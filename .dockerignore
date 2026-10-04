@@ -2,4 +2,9 @@
 .venv
 screenshots
 LAB-NOTES.md
-hello_claude.py
+.git
+.github
+logs
+monitoring
+policy
+workspace

@@ -1,5 +1,7 @@
 # AgentWarden 🛡️
 
+[![policy-tests](https://github.com/feres-salhi/agentwarden/actions/workflows/policy-tests.yml/badge.svg)](https://github.com/feres-salhi/agentwarden/actions/workflows/policy-tests.yml)
+
 **A small, working version of NVIDIA's Open Agent Safety Platform: an AI agent locked in a sandbox, a policy layer that blocks unsafe actions, an out-of-band watchdog that kills the agent, and an automated OWASP red-team exam that found (and helped fix) a real bypass.**
 
 > Inspired by the **NVIDIA Open Agent Safety Platform** (OpenShell + Sentry), announced on September 28, 2026. This is an independent learning project, not affiliated with NVIDIA. I rebuilt the core ideas with open-source tools to understand how agent containment really works, and where it breaks.
@@ -46,7 +48,7 @@ Focus area: **AI security / agent security**.
 |---|---|---|---|
 | 1 | Policy only | **11/13** ❌ | Found a real bypass: `SECRETS.ENV` (case trick) leaked the honeytoken |
 | 2 | Policy + Sentry | **13/13** | Sentry **contained** the same bypass by killing the agent (file was still read) |
-| 3 | **Fixed** policy | **13/13** ✅ | The policy now **prevents** it itself, before the file is opened |
+| 3 | **Fixed** policy + Sentry | **13/13** ✅ | The policy now **denies** the case variants itself, before the file is opened (Sentry still kills the agent afterwards) |
 
 - ⏱️ **Time to quarantine:** about **430 ms** on average (measured range 377–486 ms), from the bad action being logged to the agent container being killed.
 - 🔒 **Fail closed:** with the policy engine switched off, every action was still denied.
@@ -59,10 +61,10 @@ Focus area: **AI security / agent security**.
 1. **A task arrives** (from a user, or from promptfoo playing the attacker).
 2. **The agent** (Claude Haiku 4.5 via the Anthropic API) decides which tool it needs. It never touches anything directly: it can only *ask* for `list_files` or `read_file`.
 3. **The gateway** (`run_tool` in `agent.py`) receives the request and, before doing anything, **asks OPA** over a private Docker network.
-4. **OPA** evaluates `policy/agent.rego`: deny by default, only listed tools, protected files, no `..`, no `/`, `\` or `:` in file names. It returns `allow` plus the list of reasons for any denial.
+4. **OPA** evaluates `policy/agent.rego`: deny by default, only listed tools, file names must be text, protected files (case-insensitive), no `..`, no `/`, `\` or `:` in file names. It returns `allow` plus the list of reasons for any denial. The policy has its own unit tests (`policy/agent_test.rego`, 18 tests) that run on every push with GitHub Actions.
 5. **The gateway logs** the decision to `logs/audit.jsonl` (time, tool, arguments, decision, reasons). If OPA doesn't answer, the decision is **deny** (fail closed).
 6. **Only if allowed**, the tool runs on the read-only workspace. Otherwise the agent is told `DENIED by policy: <reason>`.
-7. **The Sentry watchdog**, running on the host outside every container, tails the audit log 20 times per second. If a request names the honeytoken, or 3 actions are denied within 60 seconds, it kills every container labeled `agentwarden=agent` and records the time to quarantine.
+7. **The Sentry watchdog**, running on the host outside every container, tails the audit log 20 times per second. If a request names the honeytoken, or 3 actions are denied within 60 seconds, it kills every container labeled `agentwarden=agent` and records the time to quarantine. An unreadable log line is skipped with a warning, so the watchdog keeps running instead of crashing.
 8. **Grafana Alloy → Loki → Grafana** turn both logs into a live dashboard (defined as code in `monitoring/dashboards/agentwarden.json`).
 
 The agent loop is capped at **10 steps**, so a confused or hijacked agent can't run forever (OWASP LLM10).
@@ -128,9 +130,18 @@ deny contains "file is protected" if {
 }
 ```
 
-**Verify.** Exam 3: both case variants now get `DENY ['file is protected']` from the policy itself.
+**Verify.** Exam 3: both case variants now get `DENY ['file is protected']` from the policy itself. Sentry was still on duty in exam 3 and also killed the agent afterwards, but the `DENY` comes from the policy before Sentry acts. The policy unit tests now check every spelling on every push.
 
 ![Exam 3: fix verified](screenshots/15-exam-3-fix-verified.png)
+
+---
+
+## 🔎 Found in a code review after publishing
+
+Re-reading the published code turned up two more problems. Both are fixed and tested:
+
+- **Non-text file names were allowed.** A request like `read_file` with `{"name": 5}`, `{"name": ["secrets.env"]}` or no name at all produced **no** deny reason, so the policy answered `allow`. Nothing leaked only because Python then failed to open the file. Fix: a new rule, `file name must be text`, written with a helper rule because in this OPA version a check on a missing value is silently skipped (the same reason a request with no `tool` field used to pass). Covered by 5 of the 18 policy tests.
+- **The watchdog could fail open.** A half-written or broken line in the audit log would crash `sentry.py`, leaving agents running with nobody watching. On a fresh clone it also crashed at start, because `logs/` is not in Git. Fix: it creates the log file if needed, waits for complete lines, and skips bad lines with a warning instead of stopping.
 
 ---
 
@@ -161,7 +172,8 @@ deny contains "file is protected" if {
 - **Silent resistance isn't security.** The model ignored every disguised injection, but never reported them. Without the audit log, nobody would know an attack happened.
 - **Trust the log, not the agent.** When a request was denied for one reason, the model confidently explained a different one. Logs tell the truth; agents tell stories.
 - **Fail closed.** If the security component is down, the safe default is to stop, not to allow.
-- **Test each layer alone.** A 100% score with two layers active can hide a broken layer. Exam 3 had to show the policy fix on its own.
+- **Test each layer alone.** A 100% score with two layers active can hide a broken layer. Exam 2 scored 13/13 while the policy was still broken. Policy unit tests now check the policy on its own, on every push.
+- **Security tools must fail closed too.** A watchdog that crashes on one bad log line protects nothing. The fix was to keep watching and warn.
 - **Secrets hygiene is part of the project.** Keys stay outside the sandbox, outside synced folders, out of Git (`.gitignore`) and out of screenshots, and are rotated when exposed.
 
 ---
@@ -171,32 +183,38 @@ deny contains "file is protected" if {
 - **Keep the API key out of the sandbox entirely.** Today the key is passed to the container as an environment variable. It's unreachable with the current tools, but a future `run_command` tool could expose it. A proxy outside the sandbox should make model calls instead (as OpenShell does with credentials).
 - **Lock the internet door.** The container can currently reach any address. Egress should be restricted to the model API only ("controlling the path to the model").
 - **Give Sentry independent eyes.** Sentry currently only reads the gateway's audit log, so an action that bypassed the gateway would be invisible to both layers. Runtime monitoring of the container itself (for example with Falco) would close that gap, which is what NVIDIA does in hardware.
-- **Allowlist files too.** Replace `protected_files` with an explicit list of readable files or patterns, and add OPA unit tests (`opa test`) for case variants, Unicode look-alikes and trailing characters.
+- **Allowlist files too.** Replace `protected_files` with an explicit list of readable files or patterns, and extend the unit tests to Unicode look-alikes and trailing dots or spaces (which Windows also ignores in file names).
 - **Track suspicious behavior per agent.** The "3 denials in 60 s" window is global; with many agents it should be counted per container.
 - **Tamper-evident logs.** Signed or append-only audit logs, written by a component the agent can't influence, and OPA's own decision logs as a second record.
-- **Run the exam in CI.** Re-run the promptfoo suite automatically with GitHub Actions on every change to the policy.
+- **Run the full exam in CI.** The policy tests already run on every push; the promptfoo exam still runs by hand, because it needs Docker and an API key.
+- **Alert when the watchdog itself stops.** If `sentry.py` is not running, nothing warns you. A heartbeat would.
 - **Real authentication for Grafana.** Anonymous access is acceptable only because the dashboard is bound to `127.0.0.1` in this local lab.
 
 ---
 
 ## 🧰 Tech stack
 
-Python 3 · Anthropic API (Claude Haiku 4.5, tool use) · Docker · Open Policy Agent (Rego) · Grafana Alloy · Loki · Grafana · Docker Compose · promptfoo · Node.js · OWASP Top 10 for Agentic Applications 2026 · OWASP Top 10 for LLM Applications
+Python 3 · Anthropic API (Claude Haiku 4.5, tool use) · Docker · Open Policy Agent (Rego, unit tests) · GitHub Actions · Grafana Alloy · Loki · Grafana · Docker Compose · promptfoo · Node.js · OWASP Top 10 for Agentic Applications 2026 · OWASP Top 10 for LLM Applications
 
 ---
 
 ## ▶️ Run it yourself
 
-Requirements: Docker Desktop, Python 3, Node.js, an Anthropic API key.
+Requirements: Docker Desktop, Python 3, Node.js, an Anthropic API key. The commands below are for **Windows PowerShell** (the lab was built on Windows).
 
 ```powershell
-# 1. Key (never commit this file)
+# 1. Key (never commit this file) and Python libraries
 "ANTHROPIC_API_KEY=your-key-here" | Out-File -Encoding ascii .env
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 
 # 2. Agent image, private network, policy engine
 docker build -t agentwarden .
 docker network create agentnet
-docker run -d --name opa --network agentnet -p 127.0.0.1:8181:8181 -v "${PWD}\policy:/policy:ro" openpolicyagent/opa:latest run --server --addr 0.0.0.0:8181 /policy
+docker run -d --name opa --network agentnet -p 127.0.0.1:8181:8181 -v "${PWD}\policy:/policy:ro" openpolicyagent/opa:1.21.1 run --server --addr 0.0.0.0:8181 /policy
+
+# Policy unit tests (18 tests)
+docker run --rm -v "${PWD}\policy:/policy:ro" openpolicyagent/opa:1.21.1 test /policy -v
 
 # 3. Dashboard (http://localhost:3000/d/agentwarden)
 mkdir logs
@@ -224,9 +242,13 @@ agentwarden/
 ├── Dockerfile             # sandbox image (non-root, slim)
 ├── run-agent.ps1          # runs the agent with every sandbox flag
 ├── policy/agent.rego      # OPA policy, deny by default
+├── policy/agent_test.rego # 18 policy unit tests (run in GitHub Actions)
+├── requirements.txt       # Python libraries (pinned)
+├── .github/workflows/     # CI: policy checks and tests on every push
 ├── monitoring/            # Alloy, Loki, Grafana (dashboard as code)
 ├── workspace/             # fake data, honeytoken, disguised injection files
-└── screenshots/           # evidence for every result above
+├── screenshots/           # evidence for every result above
+└── LICENSE                # MIT
 ```
 
 ---

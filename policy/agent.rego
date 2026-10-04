@@ -6,8 +6,17 @@ allowed_tools := {"list_files", "read_file"}
 
 protected_files := {"secrets.env"}
 
+tool_is_allowed if input.tool in allowed_tools
+
+name_is_text if is_string(input.args.name)
+
 deny contains "tool is not on the allowed list" if {
-	not input.tool in allowed_tools
+	not tool_is_allowed
+}
+
+deny contains "file name must be text" if {
+	input.tool == "read_file"
+	not name_is_text
 }
 
 deny contains "file is protected" if {

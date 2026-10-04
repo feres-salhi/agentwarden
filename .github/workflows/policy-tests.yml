@@ -1,0 +1,41 @@
+name: policy-tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  opa:
+    name: OPA policy checks and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: open-policy-agent/setup-opa@v2
+        with:
+          version: 1.21.1
+
+      - name: Check the policy compiles
+        run: opa check policy
+
+      - name: Check formatting
+        run: opa fmt --list --fail policy
+
+      - name: Run the policy tests
+        run: opa test policy -v
+
+  python:
+    name: Python syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile every Python file
+        run: python -m py_compile agent.py tools.py sentry.py provider.py
