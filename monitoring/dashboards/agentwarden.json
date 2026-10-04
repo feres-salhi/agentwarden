@@ -1,0 +1,110 @@
+{
+  "title": "AgentWarden - Agent Safety",
+  "uid": "agentwarden",
+  "schemaVersion": 39,
+  "time": { "from": "now-2d", "to": "now" },
+  "refresh": "5s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Actions allowed",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum(count_over_time({job=\"agentwarden\", decision=\"allow\"}[$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Actions denied",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 5 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum(count_over_time({job=\"agentwarden\", decision=\"deny\"}[$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Agents killed by Sentry",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 5 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum(count_over_time({job=\"agentwarden\"} |= `ms_to_quarantine` [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "orange" } }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Avg time to quarantine",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 5 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "avg(avg_over_time({job=\"agentwarden\"} |= `ms_to_quarantine` | json ms=\"ms_to_quarantine\" | unwrap ms [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "unit": "ms", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Agent decisions over time",
+      "gridPos": { "x": 0, "y": 5, "w": 24, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (decision) (count_over_time({job=\"agentwarden\", decision=~\"allow|deny\"}[$__interval]))",
+          "legendFormat": "{{decision}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 80 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "allow" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "deny" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      }
+    },
+    {
+      "type": "logs",
+      "title": "Blocked actions and Sentry kills",
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 10 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{job=\"agentwarden\"} |~ `deny|ms_to_quarantine`",
+          "queryType": "range"
+        }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" }
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+docker run --rm --label agentwarden=agent --env-file .env --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 256m --pids-limit 64 --network agentnet -v "${PWD}\workspace:/app/workspace:ro" -v "${PWD}\logs:/app/logs" agentwarden $args

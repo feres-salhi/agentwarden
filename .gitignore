@@ -1,0 +1,14 @@
+# Secrets - NEVER upload
+.env
+
+# Python's private toolbox and cache
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime logs (they keep growing, we'll publish a clean sample instead)
+logs/
+
+# promptfoo's local cache and Node.js downloads
+.promptfoo/
+node_modules/
