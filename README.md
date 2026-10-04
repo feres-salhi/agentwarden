@@ -257,4 +257,4 @@ agentwarden/
 
 **Credits:** the architecture is inspired by the [NVIDIA Open Agent Safety Platform](https://developer.nvidia.com/blog/nvidia-open-agent-safety-platform-a-reference-for-continuous-in-silicon-agent-monitoring/) (OpenShell + Sentry). Attack categories follow the [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/).
 
-**Author:** Fares Salhi · Computer Science, TU Darmstadt · [LinkedIn](https://www.linkedin.com/in/fares-salhi-03b53530a) · [Portfolio](https://magic-portfolio-for-next-js-one-fawn.vercel.app/)
+**Author:** Fares Salhi · Computer Science, TU Darmstadt · [LinkedIn](https://www.linkedin.com/in/fares-salhi-03b53530a) · [Portfolio](https://faressalhi.com)
